@@ -137,7 +137,13 @@ socket.on("restore-session", ({ userId, userName, roomId }) => {
 });
 
   // Create new room
-  socket.on("create-room", ({ roomName, password, userName }) => {
+  socket.on("create-room", ({ roomName, password, userName, userId }) => {
+    // Validate required fields
+    if (!userId || !userName || !roomName) {
+      socket.emit("error", { message: "Missing required fields" });
+      return;
+    }
+
     const roomId = uuidv4().slice(0, 8); // Short room ID
     
     rooms.set(roomId, {
@@ -150,7 +156,7 @@ socket.on("restore-session", ({ userId, userName, roomId }) => {
 
     // Auto-join creator
     socket.join(roomId);
-    const userId = uuidv4();
+    // Use userId from frontend, don't generate new one
     userSessions.set(socket.id, { name: userName, roomId, userId });
     
     const room = rooms.get(roomId);
@@ -172,11 +178,17 @@ socket.on("restore-session", ({ userId, userName, roomId }) => {
       userName
     });
 
-    console.log(`Room created: ${roomName} (${roomId}) by ${userName}`);
+    console.log(`Room created: ${roomName} (${roomId}) by ${userName} (${userId})`);
   });
 
   // Join existing room
-  socket.on("join-room", ({ roomId, password, userName }) => {
+  socket.on("join-room", ({ roomId, password, userName, userId }) => {
+    // Validate required fields
+    if (!userId || !userName) {
+      socket.emit("error", { message: "Missing required fields" });
+      return;
+    }
+
     const room = rooms.get(roomId);
     
     if (!room) {
@@ -189,8 +201,18 @@ socket.on("restore-session", ({ userId, userName, roomId }) => {
       return;
     }
 
+    // Check if this user is already in the room with another socket (shouldn't happen but safety check)
+    for (const [sockId, user] of room.users.entries()) {
+      if (user.userId === userId) {
+        room.users.delete(sockId);
+        const oldSocket = io.sockets.sockets.get(sockId);
+        if (oldSocket) oldSocket.disconnect(true);
+        break;
+      }
+    }
+
     socket.join(roomId);
-    const userId = uuidv4();
+    // Use userId from frontend, don't generate new one
     userSessions.set(socket.id, { name: userName, roomId, userId });
     room.users.set(socket.id, { name: userName, userId, socketId: socket.id });
 
@@ -211,7 +233,7 @@ socket.on("restore-session", ({ userId, userName, roomId }) => {
       userName
     });
 
-    console.log(`${userName} joined room ${room.name}`);
+    console.log(`${userName} (${userId}) joined room ${room.name}`);
   });
 
   // Send message

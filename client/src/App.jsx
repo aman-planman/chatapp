@@ -1,6 +1,7 @@
 
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import { io } from "socket.io-client";
+import { v4 as uuidv4 } from "uuid";
 import {
   Box,
   Button,
@@ -56,6 +57,17 @@ const App = () => {
   
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+
+  // Initialize persistent userId on app load
+  useEffect(() => {
+    let persistedUserId = localStorage.getItem("userId");
+    if (!persistedUserId) {
+      // Generate new userId if doesn't exist
+      persistedUserId = uuidv4();
+      localStorage.setItem("userId", persistedUserId);
+    }
+    setUserId(persistedUserId);
+  }, []);
 
   // Check for saved session on mount
   // useEffect(() => {
@@ -202,7 +214,8 @@ useEffect(() => {
     socket.emit("create-room", {
       roomName,
       password: roomPassword,
-      userName
+      userName,
+      userId
     });
   };
 
@@ -215,7 +228,8 @@ useEffect(() => {
     socket.emit("join-room", {
       roomId: joinRoomId,
       password: joinPassword,
-      userName
+      userName,
+      userId
     });
   };
 
