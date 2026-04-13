@@ -58,24 +58,66 @@ const App = () => {
   const typingTimeoutRef = useRef(null);
 
   // Check for saved session on mount
-  useEffect(() => {
-    const savedSession = localStorage.getItem("chatSession");
-    if (savedSession) {
-      const session = JSON.parse(savedSession);
-      setUserName(session.userName);
-      setUserId(session.userId);
-      setCurrentRoom(session.roomId);
+  // useEffect(() => {
+  //   const savedSession = localStorage.getItem("chatSession");
+  //   if (savedSession) {
+  //     const session = JSON.parse(savedSession);
+  //     setUserName(session.userName);
+  //     setUserId(session.userId);
+  //     setCurrentRoom(session.roomId);
       
-      // Restore session with server
-      socket.emit("restore-session", session);
-    }
+  //     // Restore session with server
+  //     socket.emit("restore-session", session);
+  //   }
     
-    // Fetch available rooms
-    fetch("http://localhost:3000/rooms")
-      .then(res => res.json())
-      .then(rooms => setAvailableRooms(rooms))
-      .catch(console.error);
-  }, []);
+  //   // Fetch available rooms
+  //   fetch("http://localhost:3000/rooms")
+  //     .then(res => res.json())
+  //     .then(rooms => setAvailableRooms(rooms))
+  //     .catch(console.error);
+  // }, []);
+
+
+// Check for saved session on mount
+useEffect(() => {
+  const savedSession = localStorage.getItem("chatSession");
+  if (savedSession) {
+    try {
+      const session = JSON.parse(savedSession);
+      // Validate session has all required fields
+      if (session.userId && session.userName && session.roomId) {
+        setUserName(session.userName);
+        setUserId(session.userId);
+        setCurrentRoom(session.roomId);
+        setJoinRoomId(session.roomId); // Pre-fill for join form fallback
+        
+        // Wait for socket connection before restoring
+        if (socket.connected) {
+          socket.emit("restore-session", session);
+        } else {
+          // Queue restoration for when connected
+          const onConnect = () => {
+            socket.emit("restore-session", session);
+            socket.off("connect", onConnect);
+          };
+          socket.on("connect", onConnect);
+        }
+      }
+    } catch (e) {
+      console.error("Invalid session data", e);
+      localStorage.removeItem("chatSession");
+    }
+  }
+  
+  // Fetch available rooms
+  fetch("http://localhost:3000/rooms")
+    .then(res => res.json())
+    .then(rooms => setAvailableRooms(rooms))
+    .catch(console.error);
+}, [socket]);
+
+
+
 
   // Socket event handlers
   useEffect(() => {
@@ -200,15 +242,27 @@ const App = () => {
     socket.emit("typing", { roomId: currentRoom, isTyping: false });
   };
 
+  // const handleLeaveRoom = () => {
+  //   localStorage.removeItem("chatSession");
+  //   setCurrentRoom(null);
+  //   setMessages([]);
+  //   setUsers([]);
+  //   setView("landing");
+  //   socket.disconnect();
+  //   window.location.reload();
+  // };
+
   const handleLeaveRoom = () => {
-    localStorage.removeItem("chatSession");
-    setCurrentRoom(null);
-    setMessages([]);
-    setUsers([]);
-    setView("landing");
-    socket.disconnect();
-    window.location.reload();
-  };
+  localStorage.removeItem("chatSession");
+  setCurrentRoom(null);
+  setMessages([]);
+  setUsers([]);
+  setView("landing");
+  setUserId("");
+  setUserName("");
+  // Don't disconnect socket - just leave room
+  socket.emit("leave-room", { roomId: currentRoom }); // Add this handler on server
+};
 
   const formatTime = (timestamp) => {
     return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -444,6 +498,7 @@ const App = () => {
 
   return (
     <Container maxWidth="sm" sx={{ height: "100vh" }}>
+      {`User:${userId}`}
       {view === "landing" && renderLanding()}
       {view === "create" && renderCreateRoom()}
       {view === "join" && renderJoinRoom()}

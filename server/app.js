@@ -1,5 +1,3 @@
-
-
 import express from "express";
 import { Server } from "socket.io";
 import { createServer } from "http";
@@ -47,33 +45,96 @@ io.on("connection", (socket) => {
   console.log("User Connected", socket.id);
 
   // Restore session if user has a stored identity
-  socket.on("restore-session", ({ userId, userName, roomId }) => {
-    if (userId && userName && roomId && rooms.has(roomId)) {
-      const room = rooms.get(roomId);
-      socket.join(roomId);
-      userSessions.set(socket.id, { name: userName, roomId, userId });
+
+//   socket.on("restore-session", ({ userId, userName, roomId }) => {
+//     if (userId && userName && roomId && rooms.has(roomId)) {
+//       const room = rooms.get(roomId);
       
-      // Add user back to room
-      room.users.set(socket.id, { name: userName, userId, socketId: socket.id });
+//       //Remove old socket for same userId
+//       for (const [sockId, user] of room.users.entries()) {
+//           if (user.userId === userId) {
+//               room.users.delete(sockId);
+//               break;
+//             }
+//         }
+
+//         //Join room with new socket
+//         socket.join(roomId);
+
+//     //Update session map
+//     userSessions.set(socket.id, { name: userName, roomId, userId });
+
       
-      // Notify others
-      socket.to(roomId).emit("user-joined", { 
-        name: userName, 
-        userId,
-        message: `${userName} rejoined the chat` 
-      });
+//       // Add user back to room
+//       room.users.set(socket.id, { name: userName, userId, socketId: socket.id });
       
-      // Send room history
-      socket.emit("room-joined", {
-        roomId,
-        roomName: room.name,
-        messages: room.messages,
-        users: Array.from(room.users.values()).map(u => ({ name: u.name, userId: u.userId })),
-        userId,
-        userName
-      });
+//       // Notify others
+//       socket.to(roomId).emit("user-joined", { 
+//         name: userName, 
+//         userId,
+//         message: `${userName} rejoined the chat` 
+//       });
+      
+//       // Send room history
+//       socket.emit("room-joined", {
+//         roomId,
+//         roomName: room.name,
+//         messages: room.messages,
+//         users: Array.from(room.users.values()).map(u => ({ name: u.name, userId: u.userId })),
+//         userId,
+//         userName
+//       });
+//     }
+//   });
+
+socket.on("restore-session", ({ userId, userName, roomId }) => {
+  if (!userId || !userName || !roomId || !rooms.has(roomId)) {
+    socket.emit("restore-failed", { message: "Session expired or room closed" });
+    return;
+  }
+
+  console.log("userID: " + userId);
+
+  
+  const room = rooms.get(roomId);
+  
+  // Remove any old socket associated with this userId
+  for (const [sockId, user] of room.users.entries()) {
+    if (user.userId === userId) {
+      room.users.delete(sockId);
+      // Disconnect the old socket if still connected
+      const oldSocket = io.sockets.sockets.get(sockId);
+      if (oldSocket) oldSocket.disconnect(true);
+      break;
     }
+  }
+
+  // Join room with new socket
+  socket.join(roomId);
+  
+  // Update session map with new socket
+  userSessions.set(socket.id, { name: userName, roomId, userId });
+  
+  // Add user with new socket (old one is already removed)
+  room.users.set(socket.id, { name: userName, userId, socketId: socket.id });
+  
+  // Notify others (don't broadcast a "joined" message since they may have seen the disconnect)
+  socket.to(roomId).emit("user-rejoined", { 
+    name: userName, 
+    userId,
+    message: `${userName} is back online` 
   });
+  
+  // Send complete room state to reconnected user
+  socket.emit("room-joined", {
+    roomId,
+    roomName: room.name,
+    messages: room.messages,
+    users: Array.from(room.users.values()).map(u => ({ name: u.name, userId: u.userId })),
+    userId,
+    userName
+  });
+});
 
   // Create new room
   socket.on("create-room", ({ roomName, password, userName }) => {
@@ -190,9 +251,6 @@ io.on("connection", (socket) => {
   });
 
 
-
-  
-
   // Handle disconnect
   socket.on("disconnect", () => {
     const userSession = userSessions.get(socket.id);
@@ -226,7 +284,34 @@ io.on("connection", (socket) => {
     }
     console.log("User Disconnected", socket.id);
   });
+
+// Add server handler for clean leave:
+
+socket.on("leave-room", ({ roomId }) => {
+  const userSession = userSessions.get(socket.id);
+  if (userSession && userSession.roomId === roomId) {
+    const { name, userId } = userSession;
+    const room = rooms.get(roomId);
+    
+    if (room) {
+      room.users.delete(socket.id);
+      socket.to(roomId).emit("user-left", {
+        name,
+        userId,
+        message: `${name} left the chat`,
+        users: Array.from(room.users.values()).map(u => ({ name: u.name, userId: u.userId }))
+      });
+    }
+    
+    socket.leave(roomId);
+    userSessions.delete(socket.id);
+  }
 });
+
+});
+
+
+
 
 server.listen(port, () => {
   console.log(`Server is running on port ${port}`);
